@@ -1,0 +1,83 @@
+#include <stdio.h>
+#include "platform.h"
+#include "xil_printf.h"
+#include "xil_io.h"
+#include "xparameters.h"
+
+// Adres bazowy Twojego IP Core (znajdziesz go w xparameters.h lub zak³adce Address Editor w Vivado)
+// Jeœli nazwa w xparameters jest inna, podstaw w³aœciw¹ lub wpisz adres bezpoœrednio (np. 0x43C00000)
+#define NWD_ACC_BASEADDR      XPAR_NWD_ACC_IP_V1_0_S00_AXI_BASEADDR
+
+// Definicje przesuniêæ adresowych (Offsets) dla rejestrów AXI (zgodnie z mapowaniem 6-bitowym)
+#define REG_INPUT0_CH0        0x00
+#define REG_INPUT0_CH1        0x04
+#define REG_INPUT0_CH2        0x08
+#define REG_INPUT0_CH3        0x0C
+
+#define REG_INPUT1_CH0        0x10
+#define REG_INPUT1_CH1        0x14
+#define REG_INPUT1_CH2        0x18
+#define REG_INPUT1_CH3        0x1C
+
+#define REG_CTRL_STATUS       0x20  // Bit 0 = START, Bit 1 = READY
+
+#define REG_OUTPUT_CH0        0x24
+#define REG_OUTPUT_CH1        0x28
+#define REG_OUTPUT_CH2        0x2C
+#define REG_OUTPUT_CH3        0x30
+
+// Maski bitowe dla rejestru kontrolno-statusowego
+#define CTRL_START_MASK       0x01
+#define STATUS_READY_MASK     0x02
+
+int main()
+{
+    init_platform();
+    xil_printf("--- Test Akceleratora Równoleg³ego NWD ---\n\r");
+
+    // 1. Definiujemy dane testowe dla 4 niezale¿nych jednostek
+    uint32_t t_input0[4] = { 24,  100,  45,  13 };
+    uint32_t t_input1[4] = { 36,   75,  75,   7 };
+    uint32_t t_output[4] = {  0,    0,   0,   0 };
+
+    // 2. Wpisanie danych wejœciowych do rejestrów akceleratora
+    Xil_Out32(NWD_ACC_BASEADDR + REG_INPUT0_CH0, t_input0[0]);
+    Xil_Out32(NWD_ACC_BASEADDR + REG_INPUT0_CH1, t_input0[1]);
+    Xil_Out32(NWD_ACC_BASEADDR + REG_INPUT0_CH2, t_input0[2]);
+    Xil_Out32(NWD_ACC_BASEADDR + REG_INPUT0_CH3, t_input0[3]);
+
+    Xil_Out32(NWD_ACC_BASEADDR + REG_INPUT1_CH0, t_input1[0]);
+    Xil_Out32(NWD_ACC_BASEADDR + REG_INPUT1_CH1, t_input1[1]);
+    Xil_Out32(NWD_ACC_BASEADDR + REG_INPUT1_CH2, t_input1[2]);
+    Xil_Out32(NWD_ACC_BASEADDR + REG_INPUT1_CH3, t_input1[3]);
+
+    xil_printf("Dane zapisane do rejestrów. Uruchamianie obliczen...\n\r");
+
+    // 3. Wysterowanie sygna³u START (zapis bitu 0 na 1)
+    Xil_Out32(NWD_ACC_BASEADDR + REG_CTRL_STATUS, CTRL_START_MASK);
+
+    // 4. Polling – oczekiwanie na flagê READY (bit 1 rejestru statusowego)
+    uint32_t status = 0;
+    do {
+        status = Xil_In32(NWD_ACC_BASEADDR + REG_CTRL_STATUS);
+    } while ((status & STATUS_READY_MASK) == 0);
+
+    xil_printf("Obliczenia zakonczone! Odczytywanie wynikow...\n\r");
+
+    // 5. Odczytanie wyników NWD ze sp³aszczonych szyn wyjœciowych
+    t_output[0] = Xil_In32(NWD_ACC_BASEADDR + REG_OUTPUT_CH0);
+    t_output[1] = Xil_In32(NWD_ACC_BASEADDR + REG_OUTPUT_CH1);
+    t_output[2] = Xil_In32(NWD_ACC_BASEADDR + REG_OUTPUT_CH2);
+    t_output[3] = Xil_In32(NWD_ACC_BASEADDR + REG_OUTPUT_CH3);
+
+    // 6. Zerowanie sygna³u START (wymagane, aby maszyna stanów w RTL wróci³a do stanu START)
+    Xil_Out32(NWD_ACC_BASEADDR + REG_CTRL_STATUS, 0x00);
+
+    // 7. Wyœwietlenie raportu koñcowego
+    for(int i = 0; i < 4; i++) {
+        xil_printf("Jednostka %d: NWD(%d, %d) = %d\n\r", i, t_input0[i], t_input1[i], t_output[i]);
+    }
+
+    cleanup_platform();
+    return 0;
+}
